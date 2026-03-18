@@ -51,6 +51,26 @@ jobs:
         run: pnpm build
       - name: Test
         run: pnpm test
+
+  preview:
+    name: Preview
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+          cache: "pnpm"
+      - name: Install
+        run: pnpm install
+      - name: Build
+        run: pnpm build
+      - name: Publish Preview
+        run: npx pkg-pr-new publish --pnpm --packageManager=pnpm
+
   release:
     name: Release
     runs-on: ubuntu-latest
