@@ -10,6 +10,7 @@ Create a commit with an auto-generated message summarizing the relevant changes 
 ## Step 1: Gather Changes
 
 Run these commands in parallel:
+
 - `git status` — see untracked and modified files
 - `git diff` — unstaged changes
 - `git diff --cached` — staged changes
@@ -27,12 +28,15 @@ For modified files, the diff output is sufficient.
 Evaluate each changed/untracked file against the apparent intent of the current task. Classify each as **relevant** or **unrelated**.
 
 Mark a file as unrelated if it:
+
 - Belongs to a different feature or fix unrelated to the current task
 - Is an auto-generated artifact (lockfiles, build output, `.cache/`) not caused by this task
 - Appears accidentally modified (e.g. whitespace-only changes in unrelated files)
 
 If unsure about any file, ask the user before proceeding:
+
 > "These files are also changed — are they part of this commit?
+>
 > - `path/to/file1`
 > - `path/to/file2`"
 
@@ -41,6 +45,7 @@ Only carry the relevant files forward into Step 4.
 ## Step 4: Draft Commit Message
 
 Write a conventional commit message:
+
 - **Type:** `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`, etc.
 - **Scope (optional):** package name if changes are scoped to one package, e.g. `feat(api):`
 - **Subject:** concise summary of what changed and why (under 72 chars)
