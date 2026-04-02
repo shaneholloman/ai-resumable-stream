@@ -5,7 +5,7 @@ import { parseJsonEventStream, type UIMessageChunk, uiMessageChunkSchema } from 
  */
 export function convertSSEToUIMessageStream(
   stream: ReadableStream<string>,
-  onComplete?: () => void,
+  onFlush?: () => void,
 ): ReadableStream<UIMessageChunk> {
   return parseJsonEventStream({
     stream: stream.pipeThrough(new TextEncoderStream()),
@@ -18,7 +18,7 @@ export function convertSSEToUIMessageStream(
         }
       },
       flush() {
-        onComplete?.();
+        onFlush?.();
       },
     }),
   );

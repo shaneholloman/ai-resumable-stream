@@ -37,7 +37,7 @@ describe(`convertSSEToUIMessageStream`, () => {
     expect(result.length).toBe(0);
   });
 
-  test(`should call onComplete callback when stream ends`, async () => {
+  test(`should call onFlush callback when stream ends`, async () => {
     // Arrange
     const sseStrings = [
       `data: {"type":"text-start","id":"1"}\n\n`,

@@ -309,6 +309,7 @@ await subscriber.quit();
 async function createResumableUIMessageStream(options: CreateResumableUIMessageStream): Promise<{
   startStream: (
     stream: ReadableStream<UIMessageChunk>,
+    options?: { onFlush?: () => void | Promise<void> },
   ) => Promise<AsyncIterableStream<UIMessageChunk>>;
   resumeStream: () => Promise<AsyncIterableStream<UIMessageChunk> | null>;
   stopStream: () => Promise<void>;
@@ -330,10 +331,13 @@ type CreateResumableUIMessageStream = {
 ```typescript
 async function startStream(
   stream: ReadableStream<UIMessageChunk>,
+  options?: { onFlush?: () => void | Promise<void> },
 ): Promise<AsyncIterableStream<UIMessageChunk>>;
 ```
 
 Starts a new resumable stream. A single drain loop reads from the source and sends chunks to both the client and Redis simultaneously. If the client disconnects, chunks continue flowing to Redis for resumability.
+
+The optional `onFlush` callback is invoked after the stream finishes draining to Redis and cleanup is complete, regardless of how the stream ended (complete, error, or abort). Use it for cleanup tasks like removing the active stream ID from the database. Errors thrown by `onFlush` are silently caught.
 
 #### `resumeStream`
 

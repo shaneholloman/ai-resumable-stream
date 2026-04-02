@@ -41,7 +41,7 @@ describe(`convertUIMessageToSSEStream`, () => {
     expect(result[0]).toBe(`data: [DONE]\n\n`);
   });
 
-  test(`should call onComplete callback when stream ends`, async () => {
+  test(`should call onFlush callback when stream ends`, async () => {
     // Arrange
     const chunks: Array<UIMessageChunk> = [
       { type: `text-start`, id: `1` },

@@ -14,7 +14,7 @@ export function convertUIMessageChunkToSSE(chunk: UIMessageChunk): string {
  */
 export function convertUIMessageToSSEStream(
   stream: ReadableStream<UIMessageChunk>,
-  onComplete?: () => void,
+  onFlush?: () => void,
 ): ReadableStream<string> {
   return stream.pipeThrough(
     new TransformStream({
@@ -23,7 +23,7 @@ export function convertUIMessageToSSEStream(
       },
       flush(controller) {
         controller.enqueue(SSE_DONE);
-        onComplete?.();
+        onFlush?.();
       },
     }),
   );

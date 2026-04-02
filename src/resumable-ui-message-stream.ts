@@ -100,7 +100,9 @@ export async function createResumableUIMessageStream(options: CreateResumableUIM
    */
   async function startStream(
     stream: ReadableStream<UIMessageChunk>,
+    options?: { onFlush?: () => void | Promise<void> },
   ): Promise<AsyncIterableStream<UIMessageChunk>> {
+    const { onFlush } = options ?? {};
     /**
      * Track client disconnect to avoid unbounded memory growth
      */
@@ -191,7 +193,13 @@ export async function createResumableUIMessageStream(options: CreateResumableUIM
         try {
           await unsubscribe();
         } catch {
-          /** Ignore errors from unsubscribe during cleanup */
+          /** Ignore errors during cleanup */
+        }
+
+        try {
+          await onFlush?.();
+        } catch {
+          /** Ignore errors during cleanup */
         }
       }
     })();

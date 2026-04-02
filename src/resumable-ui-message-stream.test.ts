@@ -515,6 +515,210 @@ describe(`createResumableUIMessageStream`, () => {
       expect(result[0]).toEqual({ type: `start` });
       expect(result[1]).toEqual({ type: `finish`, finishReason: `stop` });
     });
+
+    describe(`onFlush`, () => {
+      test(`should call onFlush when stream finishes normally`, async () => {
+        // Arrange
+        const [publisher, subscriber] = await Promise.all([
+          createRedisClient().connect(),
+          createRedisClient().connect(),
+        ]);
+
+        const streamId = `test-stream`;
+        const chunks: Array<UIMessageChunk> = [
+          { type: `start` },
+          { type: `finish`, finishReason: `stop` },
+        ];
+        const stream = createStream(chunks);
+        const onFlush = vi.fn();
+
+        const context = await createResumableUIMessageStream({
+          streamId,
+          publisher,
+          subscriber,
+          waitUntil,
+        });
+
+        // Act
+        const resultStream = await context.startStream(stream, { onFlush });
+        await convertAsyncIterableToArray(resultStream);
+        await sleep(25);
+
+        // Assert
+        expect(onFlush).toHaveBeenCalledTimes(1);
+      });
+
+      test(`should call onFlush when source stream errors`, async () => {
+        // Arrange
+        const rejectionHandler = (reason: Error) => {
+          if (reason?.message === `Stream error`) return;
+          throw reason;
+        };
+        process.on(`unhandledRejection`, rejectionHandler);
+
+        const [publisher, subscriber] = await Promise.all([
+          createRedisClient().connect(),
+          createRedisClient().connect(),
+        ]);
+
+        const streamId = `test-stream`;
+        const errorStream = new ReadableStream({
+          pull(controller) {
+            controller.error(new Error(`Stream error`));
+          },
+        });
+        let flushResolve: () => void;
+        const flushPromise = new Promise<void>((r) => {
+          flushResolve = r;
+        });
+        const onFlush = vi.fn(() => {
+          flushResolve();
+        });
+
+        const context = await createResumableUIMessageStream({
+          streamId,
+          publisher,
+          subscriber,
+          waitUntil,
+        });
+
+        // Act
+        const resultStream = await context.startStream(errorStream, { onFlush });
+        const reader = resultStream.getReader();
+        await reader.read().catch(() => {});
+        await flushPromise;
+
+        // Assert
+        expect(onFlush).toHaveBeenCalledTimes(1);
+
+        await sleep(100);
+        process.off(`unhandledRejection`, rejectionHandler);
+      });
+
+      test(`should call onFlush when stream is aborted`, async () => {
+        // Arrange
+        const [publisher, subscriber] = await Promise.all([
+          createRedisClient().connect(),
+          createRedisClient().connect(),
+        ]);
+
+        const streamId = `test-stream`;
+        const abortController = new AbortController();
+        const chunks: Array<UIMessageChunk> = [
+          { type: `start` },
+          { type: `text-delta`, id: `1`, delta: `Hello` },
+          { type: `text-delta`, id: `1`, delta: `World` },
+          { type: `finish`, finishReason: `stop` },
+        ];
+        const delayedStream = createStream(chunks, 50);
+        const onFlush = vi.fn();
+
+        const context = await createResumableUIMessageStream({
+          streamId,
+          publisher,
+          subscriber,
+          abortController,
+          waitUntil,
+        });
+
+        // Act
+        const resultStream = await context.startStream(delayedStream, { onFlush });
+        const reader = resultStream.getReader();
+        await reader.read();
+
+        await context.stopStream();
+        await sleep(300);
+
+        // Assert
+        expect(onFlush).toHaveBeenCalledTimes(1);
+
+        reader.releaseLock();
+      });
+
+      test(`should call onFlush after Redis persistence is complete`, async () => {
+        // Arrange
+        const [publisher, subscriber, secondPublisher, secondSubscriber] = await Promise.all([
+          createRedisClient().connect(),
+          createRedisClient().connect(),
+          createRedisClient().connect(),
+          createRedisClient().connect(),
+        ]);
+
+        const streamId = `test-stream`;
+        const chunks: Array<UIMessageChunk> = [
+          { type: `start` },
+          { type: `finish`, finishReason: `stop` },
+        ];
+        const stream = createStream(chunks);
+        let resumeResultInsideCallback:
+          | Awaited<ReturnType<typeof resumeContext.resumeStream>>
+          | undefined;
+        let flushResolve: () => void;
+        const flushPromise = new Promise<void>((r) => {
+          flushResolve = r;
+        });
+
+        const resumeContext = await createResumableUIMessageStream({
+          streamId,
+          publisher: secondPublisher,
+          subscriber: secondSubscriber,
+          waitUntil,
+        });
+
+        const onFlush = async () => {
+          resumeResultInsideCallback = await resumeContext.resumeStream();
+          flushResolve();
+        };
+
+        const context = await createResumableUIMessageStream({
+          streamId,
+          publisher,
+          subscriber,
+          waitUntil,
+        });
+
+        // Act
+        const resultStream = await context.startStream(stream, { onFlush });
+        await convertAsyncIterableToArray(resultStream);
+        await flushPromise;
+
+        // Assert - stream is completed, resume returns null
+        expect(resumeResultInsideCallback).toBeNull();
+      });
+
+      test(`should not throw when onFlush callback throws`, async () => {
+        // Arrange
+        const [publisher, subscriber] = await Promise.all([
+          createRedisClient().connect(),
+          createRedisClient().connect(),
+        ]);
+
+        const streamId = `test-stream`;
+        const chunks: Array<UIMessageChunk> = [
+          { type: `start` },
+          { type: `finish`, finishReason: `stop` },
+        ];
+        const stream = createStream(chunks);
+        const onFlush = vi.fn(() => {
+          throw new Error(`callback error`);
+        });
+
+        const context = await createResumableUIMessageStream({
+          streamId,
+          publisher,
+          subscriber,
+          waitUntil,
+        });
+
+        // Act
+        const resultStream = await context.startStream(stream, { onFlush });
+        const result = await convertAsyncIterableToArray(resultStream);
+
+        // Assert - stream completed successfully despite callback error
+        expect(result.length).toBe(2);
+        expect(onFlush).toHaveBeenCalledTimes(1);
+      });
+    });
   });
 
   describe(`resumeStream`, () => {
