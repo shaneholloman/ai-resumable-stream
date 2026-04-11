@@ -38,6 +38,30 @@ type CreateResumableUIMessageStream = {
   waitUntil?: (promise: Promise<unknown>) => void;
 };
 
+type StartStreamOptions = {
+  /**
+   * A promise that is awaited before closing the Redis stream, keeping the
+   * resumable-stream producer alive so late resume requests can be served
+   * from the in-memory buffer. The producer tears down when the promise resolves.
+   *
+   * Use `Promise.withResolvers()` to create a deferred promise and resolve it
+   * after post-stream work (e.g. DB writes) is complete:
+   * ```ts
+   * const { promise, resolve } = Promise.withResolvers<void>();
+   * const stream = await ctx.startStream(input, { keepAlive: promise });
+   * for await (const chunk of stream) { ... }
+   * await saveToDb();
+   * resolve();
+   * ```
+   */
+  keepAlive?: Promise<void>;
+  /**
+   * Called after the Redis stream is closed and the producer has torn down.
+   * Use for post-teardown cleanup.
+   */
+  onFlush?: () => void | Promise<void>;
+};
+
 /**
  * Creates a resumable context for starting, resuming and stopping UI message streams.
  *
@@ -96,13 +120,16 @@ export async function createResumableUIMessageStream(options: CreateResumableUIM
    * 1. Reads from source stream
    * 2. Sends UIMessageChunk directly to client stream (no conversion)
    * 3. Sends SSE to Redis stream → resumable-stream → Redis
-   * 4. Propagates errors to both streams
+   * 4. If `keepAlive` is provided, awaits it before closing the Redis stream
+   * 5. Closes the Redis stream, triggering resumable-stream teardown
+   * 6. Calls `onFlush` after teardown
+   * 7. Propagates errors to both streams
    */
   async function startStream(
     stream: ReadableStream<UIMessageChunk>,
-    options?: { onFlush?: () => void | Promise<void> },
+    options?: StartStreamOptions,
   ): Promise<AsyncIterableStream<UIMessageChunk>> {
-    const { onFlush } = options ?? {};
+    const { keepAlive = Promise.resolve(), onFlush } = options ?? {};
     /**
      * Track client disconnect to avoid unbounded memory growth
      */
@@ -153,14 +180,21 @@ export async function createResumableUIMessageStream(options: CreateResumableUIM
      * Continues draining to Redis even if client disconnects
      */
     (async () => {
+      /**
+       * Tracks whether the source stream completed successfully (reader.read() returned done: true).
+       * Used to guard the keepAlive await in finally — on error, the caller may never resolve
+       * the keepAlive promise, so awaiting it would hang the drain loop forever.
+       */
+      let sourceDone = false;
+
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) {
-            redisController!.close();
             if (!clientCancelled) {
               clientController!.close();
             }
+            sourceDone = true;
             break;
           }
           /**
@@ -194,6 +228,28 @@ export async function createResumableUIMessageStream(options: CreateResumableUIM
           await unsubscribe();
         } catch {
           /** Ignore errors during cleanup */
+        }
+
+        /**
+         * Await keepAlive promise before closing the Redis stream.
+         * This keeps the resumable-stream producer alive so late resume requests
+         * can be served from the in-memory chunk buffer.
+         * Defaults to a resolved promise (no-op) when not provided.
+         * Only await on successful source completion — on error the caller
+         * may never resolve the promise, which would hang the drain loop.
+         */
+        if (sourceDone) {
+          try {
+            await keepAlive;
+          } catch {
+            /** Ignore errors */
+          }
+        }
+
+        try {
+          redisController!.close();
+        } catch {
+          /** Already closed or errored */
         }
 
         try {
