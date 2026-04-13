@@ -91,6 +91,17 @@ const context = await createResumableUIMessageStream({
 });
 ```
 
+### Options
+
+| Option            | Type                         | Required | Description                                                    |
+| ----------------- | ---------------------------- | -------- | -------------------------------------------------------------- |
+| `streamId`        | `string`                     | Yes      | Unique identifier for the stream                               |
+| `publisher`       | `Redis`                      | Yes      | Redis client for publishing                                    |
+| `subscriber`      | `Redis`                      | Yes      | Redis client for subscribing (must be separate from publisher) |
+| `abortController` | `AbortController`            | No       | Controller to enable `stopStream` functionality                |
+| `waitUntil`       | `(promise: Promise) => void` | No       | Keep serverless function alive until stream completes          |
+
+
 ### `startStream`
 
 Start a new stream and persist chunks to Redis. Returns a client stream that can be consumed immediately.
@@ -268,17 +279,7 @@ export const appRouter = router({
 });
 ```
 
-## Configuration
-
-### Options
-
-| Option            | Type                         | Required | Description                                                    |
-| ----------------- | ---------------------------- | -------- | -------------------------------------------------------------- |
-| `streamId`        | `string`                     | Yes      | Unique identifier for the stream                               |
-| `publisher`       | `Redis`                      | Yes      | Redis client for publishing                                    |
-| `subscriber`      | `Redis`                      | Yes      | Redis client for subscribing (must be separate from publisher) |
-| `abortController` | `AbortController`            | No       | Controller to enable `stopStream` functionality                |
-| `waitUntil`       | `(promise: Promise) => void` | No       | Keep serverless function alive until stream completes          |
+## Advanced
 
 ### Redis Connection
 
@@ -303,9 +304,9 @@ await subscriber.quit();
 
 ### Keep Alive
 
-By default, the resumable-stream producer tears down immediately when the source stream ends. This means resume requests arriving during post-stream work (e.g. saving the assistant message to the database) will get `null` back, even though the full response is still in memory.
+By default, resuming a stream is only possible while the source stream is still active. That means a resume request arriving after the source stream ends will return `null` to indicate the source has completed. However, if you do post-stream work (e.g. saving the assistant message to the database) and there is a significant delay between the stream has ended and the message is saved to the database, you can use `keepAlive` option to defer closing the Redis stream and continue to serve resume requests from the in-memory buffer until your post-stream work is done.
 
-Pass a `keepAlive` promise to `startStream` to defer teardown until your post-stream work is complete:
+Pass a `keepAlive` promise to `startStream` and resolve it at the end of your function:
 
 ```typescript
 const { promise, resolve } = Promise.withResolvers<void>();
@@ -314,18 +315,18 @@ const stream = await context.startStream(result.toUIMessageStream(), {
   keepAlive: promise,
 });
 
-yield * stream;
+yield* stream;
 
-// Producer stays alive — resume requests are served from the in-memory buffer
+// Stream continues to serve resume requests from the in-memory buffer
 await saveAssistantMessage(result);
 
-// Done — producer tears down
+// Resolve to close the Redis stream and stop serving resume requests
 resolve();
 ```
 
 ### Flush
 
-The `onFlush` callback is invoked after the producer has torn down (Redis stream closed, sentinel set to DONE). Use it for cleanup tasks like removing the active stream ID from the database. Errors thrown by `onFlush` are silently caught.
+The `onFlush` callback is invoked after the source stream has ended and the Redis stream was closed. Use it for cleanup tasks like removing the active stream ID from the database. Errors thrown by `onFlush` are silently caught.
 
 ```typescript
 const stream = await context.startStream(result.toUIMessageStream(), {
